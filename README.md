@@ -19,7 +19,7 @@ taf install esm-fold
 Install the exact release:
 
 ```sh
-taf install esm-fold 2.0.0-r1
+taf install esm-fold 2.0.0-r2
 ```
 
 For local testing before the app is published to the public index:
@@ -119,8 +119,8 @@ VM with about 16 GB memory.
 
 `TAFFISH_DOCKER_RUN_ARGS`, `TAFFISH_PODMAN_RUN_ARGS`, and
 `TAFFISH_APPTAINER_RUN_ARGS` remain available for local site policy, such as
-platform emulation or extra mounts. They are appended after the app-declared
-runtime arguments.
+extra mounts or cluster-specific runtime options. They are appended after the
+app-declared runtime arguments.
 
 Even tiny CPU-only predictions still load/download the full ESMFold model, so
 they are not used as publish smoke tests.
@@ -173,18 +173,17 @@ single protein sequences and does not require an MSA database for the standard
 This release declares native `linux/amd64` only. The container is based on an
 NVIDIA CUDA devel image and installs CUDA-enabled PyTorch plus OpenFold.
 
-Apple Silicon and other arm64 hosts are not native targets for this release.
-Docker amd64 emulation may be useful for inspecting the image and running
-lightweight commands, but it does not expose the Apple GPU to this Linux CUDA
-container. PyTorch MPS is a macOS-native backend, not a Docker Linux container
-GPU passthrough mechanism.
+Apple Silicon and other arm64 hosts are not native targets for this release. For
+Docker and Podman, `src/main.taf` declares `--platform linux/amd64`, so amd64
+emulation may be useful for inspecting the image and running lightweight
+commands. It does not expose the Apple GPU to this Linux CUDA container. PyTorch
+MPS is a macOS-native backend, not a Docker Linux container GPU passthrough
+mechanism.
 
-On Apple Silicon macOS, force Docker to use the amd64 image and disable
-app-managed GPU flags:
+On Apple Silicon macOS, use Docker emulation and disable app-managed GPU flags:
 
 ```sh
 TAFFISH_CONTAINER_BACKEND=docker \
-TAFFISH_DOCKER_RUN_ARGS="--platform linux/amd64" \
 TAFFISH_ESM_FOLD_GPU=0 \
 taf-esm-fold esm-fold -h
 ```
@@ -193,7 +192,6 @@ CPU-only prediction can also be attempted through amd64 emulation:
 
 ```sh
 TAFFISH_CONTAINER_BACKEND=docker \
-TAFFISH_DOCKER_RUN_ARGS="--platform linux/amd64" \
 TAFFISH_ESM_FOLD_GPU=0 \
 taf-esm-fold esm-fold --cpu-only -i proteins.fa -o pdb-out
 ```
@@ -207,9 +205,9 @@ about 16 GB of Docker VM memory.
 ```text
 name: esm-fold
 command: taf-esm-fold
-version: 2.0.0-r1
+version: 2.0.0-r2
 kind: tool
-image: ghcr.io/taffish/esm-fold:2.0.0-r1
+image: ghcr.io/taffish/esm-fold:2.0.0-r2
 ```
 
 ## Container
