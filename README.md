@@ -7,6 +7,11 @@ This repository packages `fair-esm` 2.0.0 with the upstream ESMFold command-line
 script as a TAFFISH tool app. The published command is
 `taf-esm-fold`; the in-container upstream command is `esm-fold`.
 
+Release `2.0.0-r3` is a help-only TAFFISH update. It keeps the upstream
+software, Dockerfile, runtime dependencies, smoke tests, and command behavior
+unchanged from `2.0.0-r2`, and refreshes the terminal `taf-esm-fold --help`
+text.
+
 ## Installation
 
 Install from the public TAFFISH Hub index:
@@ -19,7 +24,7 @@ taf install esm-fold
 Install the exact release:
 
 ```sh
-taf install esm-fold 2.0.0-r2
+taf install esm-fold 2.0.0-r3
 ```
 
 For local testing before the app is published to the public index:
@@ -205,9 +210,9 @@ about 16 GB of Docker VM memory.
 ```text
 name: esm-fold
 command: taf-esm-fold
-version: 2.0.0-r2
+version: 2.0.0-r3
 kind: tool
-image: ghcr.io/taffish/esm-fold:2.0.0-r2
+image: ghcr.io/taffish/esm-fold:2.0.0-r3
 ```
 
 ## Container
