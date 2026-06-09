@@ -1,0 +1,131 @@
+#!/bin/sh
+set -eu
+
+DEFAULT_TORCH_HOME="${HOME:-/root}/.cache/taffish/esm-fold/torch"
+TORCH_HOME_DIR="${TORCH_HOME:-$DEFAULT_TORCH_HOME}"
+LOAD_MODEL=0
+QUIET=0
+
+usage() {
+  cat <<'EOF'
+esm-fold-check-models
+
+Check the local ESMFold model weight cache used by taf-esm-fold.
+
+Usage:
+  esm-fold-check-models [options]
+
+Options:
+  --torch-home DIR   Check DIR instead of TORCH_HOME.
+  --load-model       Also instantiate esm.pretrained.esmfold_v1().
+                     This is memory-heavy and should not be used for smoke.
+  -q, --quiet        Print only errors.
+  -h, --help         Show this help text.
+
+Environment:
+  TORCH_HOME         Torch cache root. The checkpoint directory is
+                     TORCH_HOME/hub/checkpoints.
+
+Expected files:
+  esmfold_3B_v1.pt
+  esm2_t36_3B_UR50D.pt
+  esm2_t36_3B_UR50D-contact-regression.pt
+
+If the files are missing, prepare them with:
+  taf-esm-fold esm-fold-download-models
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --torch-home)
+      if [ "$#" -lt 2 ]; then
+        printf >&2 'missing value for --torch-home\n'
+        exit 1
+      fi
+      TORCH_HOME_DIR=$2
+      shift 2
+      ;;
+    --torch-home=*)
+      TORCH_HOME_DIR=${1#--torch-home=}
+      shift
+      ;;
+    --load-model)
+      LOAD_MODEL=1
+      shift
+      ;;
+    -q|--quiet)
+      QUIET=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf >&2 'unknown option: %s\n' "$1"
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+CHECKPOINT_DIR="${TORCH_HOME_DIR}/hub/checkpoints"
+MIN_LARGE_BYTES="${TAFFISH_ESM_FOLD_MIN_LARGE_BYTES:-100000000}"
+MIN_SMALL_BYTES="${TAFFISH_ESM_FOLD_MIN_SMALL_BYTES:-1000}"
+
+failures=0
+
+check_file() {
+  file=$1
+  min_bytes=$2
+  path="${CHECKPOINT_DIR}/${file}"
+
+  if [ ! -f "$path" ]; then
+    printf >&2 'missing model weight: %s\n' "$path"
+    failures=$((failures + 1))
+    return
+  fi
+
+  bytes=$(wc -c < "$path" | tr -d ' ')
+  if [ "$bytes" -lt "$min_bytes" ]; then
+    printf >&2 'model weight is unexpectedly small: %s (%s bytes, minimum %s)\n' "$path" "$bytes" "$min_bytes"
+    failures=$((failures + 1))
+    return
+  fi
+
+  if [ "$QUIET" = 0 ]; then
+    printf 'ok: %s (%s bytes)\n' "$path" "$bytes"
+  fi
+}
+
+if [ "$QUIET" = 0 ]; then
+  printf 'TORCH_HOME: %s\n' "$TORCH_HOME_DIR"
+  printf 'checkpoint directory: %s\n' "$CHECKPOINT_DIR"
+fi
+
+check_file esmfold_3B_v1.pt "$MIN_LARGE_BYTES"
+check_file esm2_t36_3B_UR50D.pt "$MIN_LARGE_BYTES"
+check_file esm2_t36_3B_UR50D-contact-regression.pt "$MIN_SMALL_BYTES"
+
+if [ "$failures" -ne 0 ]; then
+  printf >&2 '\nPrepare the cache with:\n'
+  printf >&2 '  taf-esm-fold esm-fold-download-models\n'
+  printf >&2 '\nFor offline systems, prepare this TORCH_HOME on a networked host and copy it to the server.\n'
+  exit 1
+fi
+
+if [ "$LOAD_MODEL" = 1 ]; then
+  if [ "$QUIET" = 0 ]; then
+    printf 'loading esm.pretrained.esmfold_v1(); this may use substantial memory...\n'
+  fi
+  TORCH_HOME="$TORCH_HOME_DIR" python - <<'PY'
+import esm
+model = esm.pretrained.esmfold_v1()
+print("model load ok:", type(model).__name__)
+PY
+fi
+
+if [ "$QUIET" = 0 ]; then
+  printf 'ESMFold model cache looks ready.\n'
+fi

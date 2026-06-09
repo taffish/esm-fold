@@ -1,0 +1,147 @@
+#!/bin/sh
+set -eu
+
+DEFAULT_TORCH_HOME="${HOME:-/root}/.cache/taffish/esm-fold/torch"
+TORCH_HOME_DIR="${TORCH_HOME:-$DEFAULT_TORCH_HOME}"
+DRY_RUN=0
+FORCE=0
+
+ESMFOLD_URL="${TAFFISH_ESM_FOLD_ESMFOLD_URL:-https://dl.fbaipublicfiles.com/fair-esm/models/esmfold_3B_v1.pt}"
+ESM2_URL="${TAFFISH_ESM_FOLD_ESM2_URL:-https://dl.fbaipublicfiles.com/fair-esm/models/esm2_t36_3B_UR50D.pt}"
+REGRESSION_URL="${TAFFISH_ESM_FOLD_REGRESSION_URL:-https://dl.fbaipublicfiles.com/fair-esm/regression/esm2_t36_3B_UR50D-contact-regression.pt}"
+
+MIN_LARGE_BYTES="${TAFFISH_ESM_FOLD_MIN_LARGE_BYTES:-100000000}"
+MIN_SMALL_BYTES="${TAFFISH_ESM_FOLD_MIN_SMALL_BYTES:-1000}"
+
+usage() {
+  cat <<'EOF'
+esm-fold-download-models
+
+Prepare ESMFold model weights in the Torch cache used by taf-esm-fold.
+
+Usage:
+  esm-fold-download-models [options]
+
+Options:
+  --torch-home DIR   Write to DIR instead of TORCH_HOME.
+  --force            Re-download files even if they already look present.
+  --dry-run          Print planned paths and URLs without downloading.
+  -h, --help         Show this help text.
+
+Environment:
+  TORCH_HOME                         Torch cache root.
+  TAFFISH_ESM_FOLD_ESMFOLD_URL       Override esmfold_3B_v1.pt URL.
+  TAFFISH_ESM_FOLD_ESM2_URL          Override esm2_t36_3B_UR50D.pt URL.
+  TAFFISH_ESM_FOLD_REGRESSION_URL    Override contact-regression URL.
+
+This helper downloads model checkpoints only. It does not download AlphaFold,
+ColabFold, MSA databases, template databases, or structure databases.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --torch-home)
+      if [ "$#" -lt 2 ]; then
+        printf >&2 'missing value for --torch-home\n'
+        exit 1
+      fi
+      TORCH_HOME_DIR=$2
+      shift 2
+      ;;
+    --torch-home=*)
+      TORCH_HOME_DIR=${1#--torch-home=}
+      shift
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf >&2 'unknown option: %s\n' "$1"
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf >&2 'missing required command: %s\n' "$1"
+    exit 1
+  fi
+}
+
+file_ok() {
+  file=$1
+  min_bytes=$2
+  [ -f "$file" ] || return 1
+  bytes=$(wc -c < "$file" | tr -d ' ')
+  [ "$bytes" -ge "$min_bytes" ]
+}
+
+download_one() {
+  url=$1
+  out=$2
+  min_bytes=$3
+  name=$(basename "$out")
+  part="${out}.part"
+
+  if [ "$FORCE" = 0 ] && file_ok "$out" "$min_bytes"; then
+    bytes=$(wc -c < "$out" | tr -d ' ')
+    printf 'reuse existing %s (%s bytes)\n' "$name" "$bytes"
+    return
+  fi
+
+  if [ "$FORCE" = 1 ]; then
+    rm -f "$out" "$part"
+  fi
+
+  printf 'download %s\n' "$name"
+  printf '  URL: %s\n' "$url"
+  printf '  ->  %s\n' "$out"
+  curl -fL --retry 5 --retry-delay 10 -C - -o "$part" "$url"
+  mv "$part" "$out"
+
+  if ! file_ok "$out" "$min_bytes"; then
+    bytes=$(wc -c < "$out" | tr -d ' ')
+    printf >&2 'downloaded file is unexpectedly small: %s (%s bytes, minimum %s)\n' "$out" "$bytes" "$min_bytes"
+    exit 1
+  fi
+}
+
+CHECKPOINT_DIR="${TORCH_HOME_DIR}/hub/checkpoints"
+
+printf 'ESMFold model cache preparation\n'
+printf 'TORCH_HOME: %s\n' "$TORCH_HOME_DIR"
+printf 'checkpoint directory: %s\n' "$CHECKPOINT_DIR"
+
+if [ "$DRY_RUN" = 1 ]; then
+  printf 'dry run only; no files will be downloaded.\n'
+  printf 'Expected files and URLs:\n'
+  printf '  %s/esmfold_3B_v1.pt\n    %s\n' "$CHECKPOINT_DIR" "$ESMFOLD_URL"
+  printf '  %s/esm2_t36_3B_UR50D.pt\n    %s\n' "$CHECKPOINT_DIR" "$ESM2_URL"
+  printf '  %s/esm2_t36_3B_UR50D-contact-regression.pt\n    %s\n' "$CHECKPOINT_DIR" "$REGRESSION_URL"
+  exit 0
+fi
+
+need_cmd curl
+need_cmd wc
+need_cmd mkdir
+
+mkdir -p "$CHECKPOINT_DIR"
+
+download_one "$ESMFOLD_URL" "${CHECKPOINT_DIR}/esmfold_3B_v1.pt" "$MIN_LARGE_BYTES"
+download_one "$ESM2_URL" "${CHECKPOINT_DIR}/esm2_t36_3B_UR50D.pt" "$MIN_LARGE_BYTES"
+download_one "$REGRESSION_URL" "${CHECKPOINT_DIR}/esm2_t36_3B_UR50D-contact-regression.pt" "$MIN_SMALL_BYTES"
+
+printf '\nValidating cache files...\n'
+TORCH_HOME="$TORCH_HOME_DIR" esm-fold-check-models

@@ -1,4 +1,4 @@
-taf-esm-fold 2.0.0-r3
+taf-esm-fold 2.0.0-r4
 
 TAFFISH wrapper for ESMFold, the ESM protein language model interface for
 predicting protein structures from FASTA sequences.
@@ -18,6 +18,9 @@ TAF app options:
 Help and examples:
   taf-esm-fold esm-fold -h
   taf-esm-fold -- -h
+  taf-esm-fold esm-fold-download-models --dry-run
+  taf-esm-fold esm-fold-download-models
+  taf-esm-fold esm-fold-check-models
   taf-esm-fold esm-fold -i proteins.fa -o pdb-out
   taf-esm-fold esm-fold -i proteins.fa -o pdb-out --chunk-size 128
   taf-esm-fold esm-fold -i proteins.fa -o pdb-out --max-tokens-per-batch 512
@@ -48,6 +51,41 @@ GPU and runtime flags:
   Disable GPU flags:
     TAFFISH_ESM_FOLD_GPU=0 taf-esm-fold esm-fold --cpu-only -i proteins.fa -o pdb-out
 
+Model cache:
+  Model weights are not baked into the image. Real predictions require the
+  ESMFold and ESM2 checkpoint files in TORCH_HOME/hub/checkpoints.
+
+  Prepare the default cache:
+    taf-esm-fold esm-fold-download-models
+    taf-esm-fold esm-fold-check-models
+
+  Show planned files and URLs without downloading:
+    taf-esm-fold esm-fold-download-models --dry-run
+
+  Heavier manual cache validation:
+    taf-esm-fold esm-fold-check-models --load-model
+
+  The helper uses fixed upstream ESM checkpoint URLs and size sanity checks.
+  The practical end-to-end cache validation is --load-model after download.
+
+  Default TORCH_HOME:
+    $HOME/.cache/taffish/esm-fold/torch
+
+  Standard cache paths discovered by the wrapper:
+    $HOME/.cache/taffish/esm-fold/torch
+    $HOME/.local/share/taffish/models/esm-fold/torch
+    /usr/local/share/taffish/models/esm-fold/torch
+    /opt/taffish/models/esm-fold/torch
+
+  Explicit cache path:
+    mkdir -p /path/to/torch-cache
+    TAFFISH_ESM_FOLD_TORCH_HOME=/path/to/torch-cache \
+      taf-esm-fold esm-fold-download-models
+
+  Existing explicit cache directories are mounted automatically for Docker,
+  Podman, and Apptainer. Set TAFFISH_ESM_FOLD_AUTO_MOUNT=0 if you want to
+  provide backend mount arguments manually.
+
 Notes:
   The default command is esm-fold, so option-leading calls can use
   taf-esm-fold -- -i proteins.fa -o pdb-out.
@@ -56,15 +94,16 @@ Notes:
   Docker and Podman embed --platform linux/amd64 in src/main.taf. Apple Silicon
   Docker does not expose the Apple GPU to this Linux CUDA container; disable
   app-managed GPU flags for local CPU/emulation checks.
-  Model weights download on first real prediction into TORCH_HOME, defaulting
-  to $HOME/.cache/taffish/esm-fold/torch.
+  Model weights can be prepared ahead of time with esm-fold-download-models.
+  Offline systems should copy a prepared TORCH_HOME from a networked host.
   AlphaFold, ColabFold, template databases, MSA databases, and visualization
   tools are not bundled.
 
 Container:
-  image: ghcr.io/taffish/esm-fold:2.0.0-r3
+  image: ghcr.io/taffish/esm-fold:2.0.0-r4
   native platform: linux/amd64
   runtime: NVIDIA GPU auto-detected on Linux; CPU-only is upstream-supported
+  helpers: esm-fold-download-models, esm-fold-check-models
 
 Upstream:
   source:  https://github.com/facebookresearch/esm

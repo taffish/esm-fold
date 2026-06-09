@@ -7,10 +7,10 @@ This repository packages `fair-esm` 2.0.0 with the upstream ESMFold command-line
 script as a TAFFISH tool app. The published command is
 `taf-esm-fold`; the in-container upstream command is `esm-fold`.
 
-Release `2.0.0-r3` is a help-only TAFFISH update. It keeps the upstream
-software, Dockerfile, runtime dependencies, smoke tests, and command behavior
-unchanged from `2.0.0-r2`, and refreshes the terminal `taf-esm-fold --help`
-text.
+Release `2.0.0-r4` keeps the upstream ESM software at `2.0.0` and adds
+TAFFISH model-cache helpers. The image still does not bundle the ESMFold
+weights, but users can now explicitly prepare, check, share, and document the
+Torch cache used for real predictions.
 
 ## Installation
 
@@ -24,7 +24,7 @@ taf install esm-fold
 Install the exact release:
 
 ```sh
-taf install esm-fold 2.0.0-r3
+taf install esm-fold 2.0.0-r4
 ```
 
 For local testing before the app is published to the public index:
@@ -119,8 +119,8 @@ configured for NVIDIA access, either configure that backend or set
 The image patches the upstream ESMFold CLI so `--cpu-only` converts the model to
 float32 before inference. Without this, PyTorch CPU LayerNorm can fail on
 half-precision tensors. CPU-only mode is still very slow and memory-heavy; local
-validation used a 36 aa test sequence, about 8 GB of cached weights, and a Docker
-VM with about 16 GB memory.
+validation used a short FASTA test sequence, about 8 GB of cached weights, and a
+Docker VM with about 16 GB memory.
 
 `TAFFISH_DOCKER_RUN_ARGS`, `TAFFISH_PODMAN_RUN_ARGS`, and
 `TAFFISH_APPTAINER_RUN_ARGS` remain available for local site policy, such as
@@ -153,20 +153,95 @@ is large and slow without GPU acceleration, so GPU-backed Docker/Podman/Apptaine
 is the recommended route for real predictions.
 
 Model weights are not baked into the image. On first real prediction, PyTorch
-downloads the ESMFold checkpoint plus the underlying ESM2 model weights into the
-user's Torch cache. In local validation, the first-run cache was about 8 GB
-(`esmfold_3B_v1.pt`, `esm2_t36_3B_UR50D.pt`, and a small contact-regression
-file). The wrapper sets `TORCH_HOME` to
-`${TORCH_HOME:-$HOME/.cache/taffish/esm-fold/torch}` at container runtime, so
-the default cache is under the host home directory that TAFFISH mounts into the
-container. This keeps the image smaller and lets the same host cache be reused
-across runs.
+needs the ESMFold checkpoint plus the underlying ESM2 model weights. In local
+validation, the first-run cache was about 8 GB (`esmfold_3B_v1.pt`,
+`esm2_t36_3B_UR50D.pt`, and a small contact-regression file). Keeping these
+files outside the image keeps the image smaller and lets one host or site cache
+serve many runs.
 
-For shared scratch or cluster storage, choose an explicit cache directory:
+Prepare the default personal cache:
 
 ```sh
-TORCH_HOME=/path/to/torch-cache taf-esm-fold esm-fold -i proteins.fa -o pdb-out
+taf-esm-fold esm-fold-download-models
+taf-esm-fold esm-fold-check-models
 ```
+
+Show the planned cache paths and source URLs without downloading:
+
+```sh
+taf-esm-fold esm-fold-download-models --dry-run
+```
+
+Check files without loading the model:
+
+```sh
+taf-esm-fold esm-fold-check-models
+```
+
+For a heavier manual validation after the cache is prepared, instantiate the
+upstream model:
+
+```sh
+taf-esm-fold esm-fold-check-models --load-model
+```
+
+The helper uses the fixed upstream ESM checkpoint URLs and size sanity checks.
+The ESM project does not publish a GTDB-Tk-style MD5 bundle for these weight
+files in the upstream package metadata; `--load-model` is the practical
+end-to-end validation that the prepared cache is readable by `fair-esm`.
+
+The helper writes to `TORCH_HOME/hub/checkpoints`. If neither `TORCH_HOME` nor
+`TAFFISH_ESM_FOLD_TORCH_HOME` is set, the wrapper uses:
+
+```text
+$HOME/.cache/taffish/esm-fold/torch
+```
+
+The wrapper also looks for already prepared caches in:
+
+```text
+$HOME/.cache/taffish/esm-fold/torch
+$HOME/.local/share/taffish/models/esm-fold/torch
+/usr/local/share/taffish/models/esm-fold/torch
+/opt/taffish/models/esm-fold/torch
+```
+
+When one of these paths exists, or when `TAFFISH_ESM_FOLD_TORCH_HOME` /
+`TORCH_HOME` points to an existing directory, Docker/Podman mount it into the
+container at the same path. Apptainer uses a matching bind. This is deliberately
+a model cache, not an immutable database mount, so it is mounted read-write; the
+helper and PyTorch may fill missing checkpoint files.
+
+For shared scratch or cluster storage, create a visible cache directory first
+and choose it explicitly:
+
+```sh
+mkdir -p /path/to/torch-cache
+TAFFISH_ESM_FOLD_TORCH_HOME=/path/to/torch-cache \
+  taf-esm-fold esm-fold-download-models
+
+TAFFISH_ESM_FOLD_TORCH_HOME=/path/to/torch-cache \
+  taf-esm-fold esm-fold -i proteins.fa -o pdb-out
+```
+
+If a custom cache path is outside the host home directory or current working
+tree, it must be visible to the selected container backend. The wrapper tries to
+mount existing explicit cache directories automatically. To manage mounts
+manually, disable that behavior:
+
+```sh
+TAFFISH_ESM_FOLD_AUTO_MOUNT=0 \
+TAFFISH_DOCKER_RUN_ARGS="-v /path/to/torch-cache:/path/to/torch-cache" \
+TAFFISH_ESM_FOLD_TORCH_HOME=/path/to/torch-cache \
+taf-esm-fold esm-fold-check-models
+```
+
+Use `TAFFISH_PODMAN_RUN_ARGS` for Podman. For Apptainer, use
+`TAFFISH_APPTAINER_RUN_ARGS="--bind /path/to/torch-cache:/path/to/torch-cache"`.
+
+For offline servers, run `esm-fold-download-models` on a networked host, copy
+the resulting Torch cache directory to the server, and point
+`TAFFISH_ESM_FOLD_TORCH_HOME` or `TORCH_HOME` at that copied cache.
 
 This app does not bundle AlphaFold, ColabFold, template databases, MSA
 databases, or protein visualization tools. ESMFold predicts directly from
@@ -210,9 +285,9 @@ about 16 GB of Docker VM memory.
 ```text
 name: esm-fold
 command: taf-esm-fold
-version: 2.0.0-r3
+version: 2.0.0-r4
 kind: tool
-image: ghcr.io/taffish/esm-fold:2.0.0-r3
+image: ghcr.io/taffish/esm-fold:2.0.0-r4
 ```
 
 ## Container
@@ -227,23 +302,37 @@ The Dockerfile also installs the upstream `scripts/esmfold_inference.py` file as
 package but not a console entry point. The installed script is patched for
 CPU-only float32 inference inside this container.
 
+Release `2.0.0-r4` also installs two TAFFISH helper commands:
+
+```text
+esm-fold-download-models
+esm-fold-check-models
+```
+
+They prepare or validate the Torch checkpoint cache used by the upstream
+`esm-fold` command. They do not download structure databases, sequence
+databases, templates, AlphaFold data, or ColabFold data.
+
 The TAFFISH metadata declares a Docker smoke check:
 
 ```text
-exist: esm-fold, python, python3, pip, nvcc
+exist: esm-fold, esm-fold-download-models, esm-fold-check-models, python,
+       python3, pip, nvcc, curl
 test:  upstream CLI help is available
 test:  fair-esm is pinned to 2.0.0
 test:  PyTorch imports with the pinned 1.12.1 runtime
 test:  esm, openfold, deepspeed, dllogger, and dm-tree import
 test:  the CPU-only float32 patch is present
 test:  esm.data.read_fasta parses a tiny FASTA file
+test:  model helper help and dry-run work without network downloads
+test:  missing model cache is reported clearly
 ```
 
 Smoke does not run a full prediction, because that would download large model
 weights and require a real GPU during index validation.
 
-Manual local validation also completed a CPU-only prediction for a 36 aa FASTA
-sequence and produced a 300-line PDB file after the model cache was prepared.
+Manual local validation also completed a CPU-only prediction for a short FASTA
+sequence and produced a PDB file after the model cache was prepared.
 
 ## Upstream
 
@@ -253,3 +342,8 @@ sequence and produced a 300-line PDB file after the model cache was prepared.
 - PyPI: <https://pypi.org/project/fair-esm/2.0.0/>
 - License: MIT
 - Citation: Lin et al. 2023, doi:10.1126/science.ade2574, PMID:36927031
+
+The ESMFold model weights are distributed by the upstream ESM project and are
+retrieved only when the user explicitly prepares the cache or runs a real
+prediction. They are not included in this TAFFISH app repository or in the
+container image.
